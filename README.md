@@ -2,8 +2,8 @@
 
 Completes TF2 "dynamic recipes" (Killstreak Kit Fabricators, and theoretically
 Chemistry Sets) via the game coordinator, using `tf2` (node-tf2) v4 +
-`steam-user` v5. Pure logic only so far — no UI, no CLI to actually trigger a
-craft yet.
+`steam-user` v5. No UI yet, but `scripts/fulfill-recipe.js` is a working
+interactive CLI that has completed a real craft — see Status below.
 
 ## Why this isn't just `tf2.craft()`
 
@@ -23,10 +23,14 @@ patching the `tf2` package.
   live from a backpack (2x Specialized, 1x Professional). See
   `test/fixtures/realFabricators.js` (raw bytes, not hand-built) and
   `test/parseRecipe.test.js`.
-- `fulfillDynamicRecipe` (the actual send) — **implemented but NOT
-  empirically tested**. Validation and payload encoding are tested against
-  real recipe data; the network round-trip against the live GC has not been
-  exercised. Do not treat a green test suite as proof that crafting works.
+- `fulfillDynamicRecipe` (the actual send) — **confirmed working for
+  Specialized Fabricators**, as of a real craft on 2026-07-14: consumed a
+  Specialized Killstreak Kit Fabricator + 1 Killstreak Mantreads (tier 1) +
+  29 individual robot parts, and produced the expected Kit (itemdef 6523,
+  with its preset sheen/target-weapon attributes) — confirmed both via
+  `inventoryEvents` and visually in-game. Still untested: Professional
+  Fabricators (2 weapons at the same `attribute_index`) and the exact wire
+  format of the Response message — see Next Steps.
 - Chemistry Sets — **theoretical only**. They use the same GC message
   (`FulfillDynamicRecipeComponent`) and the same item-attribute encoding
   (defindex 2000-2009), so the architecture should support them, but none of
@@ -42,7 +46,8 @@ patching the `tf2` package.
 - Each slot's `value_bytes` decodes as `CAttribute_DynamicRecipeComponent { def_index, item_quality, component_flags, attributes_string, num_required, num_fulfilled }` — **not** the `_COMPAT_NEVER_SERIALIZE_THIS_OUT` variant, which is explicitly marked as not used for real serialization (and empirically mis-parses `num_required` into the wrong field).
 - `attributes_string` is a sequence of real tokens separated by a literal `|` byte, where every gap between two real tokens contains the 4-byte control sequence `\x01\x02\x01\x03` **twice**. Splitting on single `|` bytes and discarding segments that are exactly that 4-byte filler recovers clean `(attribute defindex, raw value)` pairs. Verified against real output slots (sheen/killstreaker/tool-target-item triples) and real input slots (a `loot_rarity` requirement on the rarest robot parts of the Professional fabricator).
 - There is **no `is_output` field on the wire**. Classification is inferred (see below) and validated against all 3 real samples, but that's 3 data points, not a spec.
-- **A slot whose `itemDefIndex` decodes to 0, carrying attribute 2025 ("killstreak tier"), is a real "weaponChoice" requirement — CONFIRMED by an actual craft, not inferred.** It requires `quantityRequired` freely-chosen weapons (any weapon works structurally — `itemDefIndex` is 0, there's nothing to match against), sent as ordinary `CMsgRecipeComponent` entries the same as any other slot (`attribute_index` = the slot, e.g. 2000; `subject_item_id` = the chosen weapon's item id). Confirmed counts: **Specialized Fabricator needs 1 weapon** (must be Unique quality with a normal/tier-1 Killstreak Kit already applied); **Professional Fabricator needs 2 weapons** (must be Unique with a Specialized Killstreak Kit already applied on each). `parseRecipe` classifies these as `kind: 'weaponChoice'`; `validateAssignments`/`buildFulfillPayload` treat them as sendable components. **The kit-tier precondition on the chosen weapon(s) is NOT validated by this library** (checking whether a specific weapon already carries the right kit is nontrivial and out of scope for now) — `validateAssignments` only checks that exactly the right number of ids were given and that they exist in the backpack, and always returns a `warnings` entry reminding the caller to check the precondition by hand. `scripts/fulfill-recipe.js` prints this requirement text and asks for the weapon id(s) interactively — it cannot be auto-detected.
+- **A slot whose `itemDefIndex` decodes to 0, carrying attribute 2025 ("killstreak tier"), is a real "weaponChoice" requirement — CONFIRMED by an actual craft, not inferred.** It requires `quantityRequired` freely-chosen weapons (any weapon works structurally — `itemDefIndex` is 0, there's nothing to match against), sent as ordinary `CMsgRecipeComponent` entries the same as any other slot (`attribute_index` = the slot, e.g. 2000; `subject_item_id` = the chosen weapon's item id). Confirmed counts: **Specialized Fabricator needs 1 weapon** (must be Unique quality with a normal/tier-1 Killstreak Kit already applied); **Professional Fabricator needs 2 weapons** (must be Unique with a Specialized Killstreak Kit already applied on each). `parseRecipe` classifies these as `kind: 'weaponChoice'`; `validateAssignments`/`buildFulfillPayload` treat them as sendable components. **The full send-and-accept path for a 1-weapon weaponChoice slot is now confirmed working end-to-end** (Specialized Fabricator, real craft 2026-07-14) — Professional's 2-weapons-at-the-same-`attribute_index` case is still untested. **The kit-tier precondition on the chosen weapon(s) is NOT validated by this library** (checking whether a specific weapon already carries the right kit is nontrivial and out of scope for now) — `validateAssignments` only checks that exactly the right number of ids were given and that they exist in the backpack, and always returns a `warnings` entry reminding the caller to check the precondition by hand. `scripts/fulfill-recipe.js` prints this requirement text and asks for the weapon id(s) interactively — it cannot be auto-detected.
+- **A slot needing N units is satisfied by N separate `CMsgRecipeComponent` entries, each with its own `subject_item_id` — CONFIRMED by the same real craft** (29 individual robot-part items, none stacked, all accepted for a Specialized Fabricator). Whether a single bulk-stacked item (one id with `quantity >= N`) would *also* work was not exercised, since nothing in the tested backpack was stacked that high.
 
 ### Inferred / unconfirmed — flagged in code comments too
 
@@ -50,8 +55,7 @@ patching the `tf2` package.
 - Any OTHER slot with `itemDefIndex` 0 that does **not** carry attribute 2025 (none seen yet) still falls back to `kind: 'attribute'` — surfaced but never sent, since its purpose isn't confirmed. This fallback exists specifically so a future, different-shaped itemdef-0 slot doesn't get silently misinterpreted as a weaponChoice.
 - **The numeric values inside `attributes_string`** are inconsistently encoded — some are plain decimal (killstreak tier: `"1"`, `"2"`), others are the decimal text of the attribute's raw float32 bit pattern (`loot_rarity`: `"1065353216"` = bits of `1.0`). `parseRecipe` returns these as raw string tokens and does not attempt to normalize them, because I can't confirm the rule for which is which in general.
 - **`component_flags`** (12/13/24/25 seen across samples) — no confirmed bitfield meaning. Passed through raw, unused by any logic.
-- **`FulfillDynamicRecipeComponentResponse` (GC msg 1086) has no documented protobuf body anywhere in the available `.proto` sources** — and neither do any of its sibling "action response" messages (`ApplyXifierResponse`, `ItemEaterRechargerResponse`, `RemoveKillStreakResponse`). node-tf2 doesn't handle any of them either. `fulfillDynamicRecipe` currently correlates the response via `sendToGC`'s job-id callback (the documented request/response mechanism in steam-user), but **it's unconfirmed whether TF2's GC actually echoes `jobid_target` for this message**, or broadcasts it unsolicited the way `CraftResponse` is. If it's unsolicited, the job callback will simply never fire and every call will resolve via timeout (`acknowledged: false`) even on a real success.
-- **Whether a slot needing N units should get one `CMsgRecipeComponent` (bulk-consuming a stacked item) or N repeated entries** is unconfirmed — the message has no quantity field, so bulk-consuming a single stack with sufficient `quantity` is the leading hypothesis. `fulfillRecipe`'s `assignments` format accepts either a single item id or an array per slot so both are expressible without code changes once this is known.
+- **`FulfillDynamicRecipeComponentResponse` (GC msg 1086) still has no confirmed schema.** No documented protobuf body exists anywhere in the available `.proto` sources — and neither do any of its sibling "action response" messages (`ApplyXifierResponse`, `ItemEaterRechargerResponse`, `RemoveKillStreakResponse`). node-tf2 doesn't handle any of them either. `fulfillDynamicRecipe` correlates it via `sendToGC`'s job-id callback, but it's still unconfirmed whether TF2's GC actually echoes `jobid_target` for this message or broadcasts it unsolicited the way `CraftResponse` is — **this did not get resolved by the 2026-07-14 craft**, because that craft was confirmed successful via `inventoryEvents` (the consumed items disappearing, the new Kit appearing), not by decoding the Response payload. Treat `inventoryEvents` as the real success signal for now; `acknowledged`/`raw` are auxiliary until 1086's format is understood.
 
 None of the above was guessed into "done" — see the Next Steps section for exactly what a live test needs to check.
 
@@ -89,7 +93,7 @@ Both in `lib/fulfillRecipe.js`. `assignments` is `{ [attributeIndex]: itemId | i
 Extends a live `TeamFortress2` instance in place (idempotent). Adds:
 
 - `tf2.parseDynamicRecipe(toolItemId)` — looks the item up in `tf2.backpack` and calls `parseRecipe`.
-- `tf2.fulfillDynamicRecipe(toolItemId, assignments, options?)` — **Validates every input and weaponChoice slot against `tf2.backpack` before sending anything**; if anything required is missing, it resolves `{ sent: false, missing: [...], warnings: [...] }` without touching the network. On success it sends and resolves `{ sent: true, acknowledged, timedOut, raw, warnings, inventoryEvents, recipe }`. Also emits `tf2.emit('dynamicRecipeFulfillResult', result)` with the same object. **`acknowledged: true` means a response arrived, not that the craft succeeded** — see the unconfirmed-response-schema caveat above.
+- `tf2.fulfillDynamicRecipe(toolItemId, assignments, options?)` — **Validates every input and weaponChoice slot against `tf2.backpack` before sending anything**; if anything required is missing, it resolves `{ sent: false, missing: [...], warnings: [...] }` without touching the network. On success it sends and resolves `{ sent: true, acknowledged, timedOut, raw, warnings, inventoryEvents, recipe }`. Also emits `tf2.emit('dynamicRecipeFulfillResult', result)` with the same object. **`acknowledged: true` means a response arrived, not that the craft succeeded** — see the unconfirmed-response-schema caveat above. **`inventoryEvents` is the signal that's actually been confirmed reliable** (real craft, 2026-07-14).
 
 ## Tests
 
@@ -109,7 +113,7 @@ Read-only diagnostic: dumps every raw attribute of one specific backpack item by
 
 ## `scripts/fulfill-recipe.js`
 
-The live-test harness for the real craft: logs in, lists dynamic recipe items in your backpack **with a full summary per item** (category from tool def_index, output itemdef, every input's itemdef+quantity, and any weapon requirement) so you never pick blind, lets you pick one, auto-matches robot-part-style components by scanning your backpack (greedy, largest stack first, never double-books the same stack across two slots), and for any `weaponChoice` slot **shows you a numbered list of candidate weapons from your own backpack and asks you to pick by index — never a raw item id**. It then re-validates everything, prints the full plan (what gets consumed, what the output looks like, and any warnings it can't verify itself), and **requires you to type `CONFIRMAR` before sending anything**. `tf2.on('debug', ...)` is always logged so you can see immediately whether the response is job-correlated or unsolicited (README "Next steps", item 1).
+The live-test harness for the real craft: logs in, lists dynamic recipe items in your backpack **with a full summary per item** (category from tool def_index, output itemdef, every input's itemdef+quantity, and any weapon requirement) so you never pick blind, lets you pick one, auto-matches robot-part-style components by scanning your backpack (greedy, largest stack first, never double-books the same stack across two slots), and for any `weaponChoice` slot **shows you a numbered list of candidate weapons from your own backpack and asks you to pick by index — never a raw item id**. It then re-validates everything, prints the full plan (what gets consumed, what the output looks like, and any warnings it can't verify itself), and **requires you to type `CONFIRMAR` before sending anything**. This is what completed the real Specialized Fabricator craft on 2026-07-14 (see Status). `tf2.on('debug', ...)` is always logged so you can see whether the Response message is job-correlated or unsolicited — still unresolved, see Next Steps.
 
 ```
 node scripts/fulfill-recipe.js             interactive; asks for typed confirmation before sending
@@ -128,14 +132,20 @@ Candidates are still never hard-excluded by detected tier — a wrong detection 
 
 Display names come from TF2's item schema (`item_name` token) resolved against an **unofficial mirror of Valve's English lang file**, fetched once at startup over HTTPS from `raw.githubusercontent.com/SteamDatabase/GameTracking-TF2` — this is a real runtime network dependency, purely for display, that can fail or the file can move; if it does, names fall back to a humanized internal dev name (`TF_WEAPON_FIREAXE` → `Fireaxe`) or, failing that, the bare defindex. Nothing about what gets sent to the GC depends on this lookup succeeding.
 
-## Next steps (needs a real craft to resolve)
+## Next steps
 
-When you're ready to spend the robot parts on a real Professional/Specialized Killstreak Kit Fabricator, here's what a live run needs to establish, in order:
+### Resolved by a real craft (Specialized Fabricator, 2026-07-14)
 
-1. Watch `tf2.on('debug', ...)` while calling `fulfillDynamicRecipe`. If you see `"Got unhandled GC message FulfillDynamicRecipeComponentResponse"`, the response is unsolicited/broadcast (like `CraftResponse`), not job-correlated — the job-callback path in `dynamicRecipeClient.js` will need to be replaced with a handler registered on `Language.FulfillDynamicRecipeComponentResponse` instead.
-2. Whichever path fires, dump the raw response buffer's hex — that's the only way to find out if `CMsgFulfillDynamicRecipeComponentResponse` has a real schema (likely just an EResult, but unconfirmed).
-3. Check `inventoryEvents` on the result: does `itemChanged`/`itemRemoved` fire for the consumed robot parts and weapon(s), and `itemAcquired` for the new Kit? This is probably the most reliable success signal regardless of what the Response payload turns out to contain.
-4. Confirm whether a single stacked item per slot is enough (leading hypothesis) for robot-part slots, or whether the GC expects it split differently. Separately: for the weaponChoice slot on a Professional Fabricator, confirm that sending 2 separate `CMsgRecipeComponent` entries that share the same `attribute_index` (2000) with 2 different `subject_item_id`s is actually the right shape — untested at the wire level, only encode/decode round-tripped.
-5. Verify the weapon-count/kit-tier mapping documented above (1 weapon w/ normal Kit for Specialized, 2 weapons w/ Specialized Kit for Professional) holds for the *specific* Fabricator you're testing — it was confirmed empirically but only on the instances tested so far.
+- **Success signal**: `inventoryEvents` (consumed items disappearing, the new Kit appearing) is what actually confirmed the craft worked — not decoding the `FulfillDynamicRecipeComponentResponse` payload. That payload's exact meaning is still unknown (see below), but it doesn't block using `inventoryEvents` as the real signal.
+- **Quantity format**: a slot needing N units is satisfied by N separate `CMsgRecipeComponent` entries (29 individual robot-part items, none stacked) — the GC accepted that shape.
+- **weaponChoice mechanism**: sending a weapon's item id as a `CMsgRecipeComponent` against the weaponChoice slot (2000) is accepted and consumes the weapon as expected — confirmed for the 1-weapon Specialized case.
 
-I'm not marking `fulfillDynamicRecipe` "done" in the sense of "known to work" — only "implemented against everything that's confirmable without spending real items."
+### Still untested
+
+1. **Professional Fabricators**: sending 2 separate `CMsgRecipeComponent` entries that share the same `attribute_index` (2000) with 2 different `subject_item_id`s — untested at the wire level, only encode/decode round-tripped.
+2. **Killstreak tier detection for tier 2/3** (Specialized/Professional) — only tier 1 (normal Killstreak) has been confirmed against a real weapon; tiers 2/3 are presumed to follow the same float32 pattern, not individually verified.
+3. **Chemistry Sets** — entirely theoretical; same GC message and slot encoding should apply, but never run against a real one.
+4. **`FulfillDynamicRecipeComponentResponse` (GC msg 1086) exact format** — still no confirmed schema, and still unknown whether it's job-correlated (via `sendToGC`'s callback) or broadcast unsolicited like `CraftResponse`. Watch `tf2.on('debug', ...)` for `"Got unhandled GC message FulfillDynamicRecipeComponentResponse"` during a future craft to settle the correlation question; dump the raw hex to work out the schema.
+5. **A single bulk-stacked item per slot** (one id with `quantity >= N`, instead of N individual items) was never exercised — the tested backpack didn't have robot parts stacked that high.
+
+`fulfillDynamicRecipe` is confirmed working end-to-end for Specialized Fabricators. Professional Fabricators and Chemistry Sets are not — don't treat the Specialized result as proof those work too.
