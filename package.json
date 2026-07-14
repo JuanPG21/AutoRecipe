@@ -1,13 +1,25 @@
 {
   "name": "autorecipe",
   "version": "1.0.0",
-  "description": "",
+  "description": "Completes TF2 dynamic recipes (Killstreak Kit Fabricators, theoretically Chemistry Sets) via the game coordinator, extending node-tf2 with FulfillDynamicRecipeComponent support it doesn't implement.",
   "scripts": {
     "test": "node --test"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "tf2",
+    "team-fortress-2",
+    "steam",
+    "node-tf2",
+    "node-steam-user",
+    "killstreak",
+    "game-coordinator"
+  ],
+  "author": "JuanPG21",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JuanPG21/AutoRecipe.git"
+  },
   "type": "commonjs",
   "dependencies": {
     "kvparser": "^1.0.2",
