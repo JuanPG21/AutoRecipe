@@ -1,0 +1,28 @@
+node_modules/
+
+# Steam credentials - none of the scripts read these today, but this is the
+# conventional place a future STEAM_USERNAME/STEAM_PASSWORD would end up.
+.env
+.env.*
+*.env
+
+# Output from the diagnostic scripts (dump-fabricator.js, dump-item.js,
+# fulfill-recipe.js) if ever redirected to a file instead of stdout - these
+# contain real item ids and raw backpack contents.
+*.dump.json
+*.dump.txt
+dump-*.json
+dump-*.txt
+backpack*.json
+inventory*.json
+
+# Generic run output/results
+*.log
+output/
+out/
+result*.json
+results/
+
+# Anything explicitly marked private/local
+*.local.*
+*.secret*
