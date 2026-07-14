@@ -22,6 +22,7 @@ const TeamFortress2 = require('tf2');
 const { attachDynamicRecipeSupport } = require('../lib/dynamicRecipeClient.js');
 const { parseRecipe, SLOT_MIN, SLOT_MAX, KILLSTREAK_TIER_ATTRIBUTE_DEFINDEX } = require('../lib/parseRecipe.js');
 const { validateAssignments } = require('../lib/fulfillRecipe.js');
+const { robotPartName } = require('../lib/robotPartCatalog.js');
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const CONFIRM_PHRASE = 'CONFIRMAR';
@@ -156,6 +157,17 @@ function resolveDisplayName(defIndex, itemSchema, lang) {
 }
 
 /**
+ * Display string for a robot-part input itemdef: static lookup via
+ * lib/robotPartCatalog.js (no network, no live item schema needed - see
+ * that module's doc comment). Falls back to the bare itemdef, never throws,
+ * for anything outside the 8 confirmed robot parts.
+ */
+function describeItemDef(itemDefIndex) {
+	const name = robotPartName(itemDefIndex);
+	return name ? `${name} (itemdef ${itemDefIndex})` : `itemdef ${itemDefIndex}`;
+}
+
+/**
  * CONFIRMED against a real captured weapon (a Killstreak Mantreads, tier 1):
  * killstreak tier lives in attribute 2025's `value_bytes`, as a little-endian
  * float32 (hex 0000803f = 1.0 = tier 1) - NOT in the `value` field, which
@@ -228,7 +240,7 @@ function printItemSummary(idx, described) {
 	}
 	console.log(`      output: itemdef ${recipe.output.itemDefIndex} x${recipe.output.quantityRequired} (quality ${recipe.output.quality})`);
 	recipe.inputs.forEach((s) => {
-		console.log(`      input:  itemdef ${s.itemDefIndex} x${s.quantityRequired} (quality ${s.quality})`);
+		console.log(`      input:  ${describeItemDef(s.itemDefIndex)} x${s.quantityRequired} (quality ${s.quality})`);
 	});
 	recipe.weaponChoices.forEach((s) => {
 		console.log(`      weapon: ${s.quantityRequired}x elección manual - ${weaponRequirementText(recipe.toolDefIndex)}`);
@@ -299,7 +311,7 @@ function printPlan(recipe, plan) {
 
 	console.log('\nInput plan (auto-detected from backpack):');
 	for (const { slot, chosen, satisfied, shortBy } of plan) {
-		console.log(`  slot ${slot.attributeIndex}: itemdef ${slot.itemDefIndex} quality ${slot.quality} x${slot.quantityRequired}`);
+		console.log(`  slot ${slot.attributeIndex}: ${describeItemDef(slot.itemDefIndex)} quality ${slot.quality} x${slot.quantityRequired}`);
 		if (chosen.length === 0) {
 			console.log('    -> NOTHING FOUND in backpack');
 		} else {
@@ -528,6 +540,7 @@ module.exports = {
 	collectWeaponChoices,
 	humanizeInternalName,
 	resolveDisplayName,
+	describeItemDef,
 	detectKillstreakTier,
 	findWeaponCandidates,
 };

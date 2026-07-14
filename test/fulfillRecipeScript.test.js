@@ -15,6 +15,7 @@ const {
 	collectWeaponChoices,
 	humanizeInternalName,
 	resolveDisplayName,
+	describeItemDef,
 	detectKillstreakTier,
 	findWeaponCandidates,
 } = require('../scripts/fulfill-recipe.js');
@@ -163,6 +164,16 @@ test('requiredWeaponTier maps Specialized to tier 1 and Professional to tier 2, 
 	assert.equal(requiredWeaponTier(20002), 1);
 	assert.equal(requiredWeaponTier(20003), 2);
 	assert.equal(requiredWeaponTier(12345), null);
+});
+
+test('describeItemDef shows the readable robot-part name with the itemdef in parens', () => {
+	assert.equal(describeItemDef(5705), 'Battle-Worn Robot Taunt Processor (itemdef 5705)');
+	assert.equal(describeItemDef(5700), 'Pristine Robot Currency Digester (itemdef 5700)');
+});
+
+test('describeItemDef falls back to the bare itemdef for anything not in the robot part catalog, without throwing', () => {
+	assert.equal(describeItemDef(5708), 'itemdef 5708'); // adjacent crate, not a robot part
+	assert.equal(describeItemDef(9999999), 'itemdef 9999999');
 });
 
 const fakeItemSchema = {
