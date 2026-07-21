@@ -13,7 +13,7 @@ AutoRecipe implements it against the current API, extending a `TeamFortress2` in
 | | |
 |---|---|
 | Specialized Fabricators | ✅ Confirmed working against a real craft |
-| Professional Fabricators | ⚠️ Untested (needs 2 weapons at the same slot) |
+| Professional Fabricators | ✅ Confirmed working against a real craft |
 | Chemistry Sets | ⚠️ Untested — same GC message in theory, never run against one |
 
 This consumes real items. The Specialized path is the only one confirmed end-to-end. Don't assume the others work.
